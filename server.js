@@ -4,6 +4,7 @@
  */
 require("dotenv").config({ path: "D:\\db\\Github\\APP\\cheshi\\.env" });
 const express = require("express");
+const cors = require("cors");
 const cron = require("node-cron");
 const { createClient } = require("@supabase/supabase-js");
 const { WebSocket } = require("ws");
@@ -11,6 +12,7 @@ const { GameClient } = require("./lib/gameClient");
 const { bon, encode, parse, getEnc } = require("./lib/bonProtocol");
 
 const app = express();
+app.use(cors());
 app.use(express.json());
 
 // ==================== Supabase 客户端 ====================
