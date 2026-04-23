@@ -177,8 +177,8 @@ async function loadTokens() {
 async function executeTask(task) {
   addLog("INFO", "task", `开始执行任务: ${task.name}`, { taskId: task.id });
 
-  // 加载 token_ids（Supabase 存的是 UUID 列表）
-  let tokenIds = task.token_ids;
+  // 加载 selected_tokens（Supabase 存的是 UUID 列表）
+  let tokenIds = task.selected_tokens;
   if (typeof tokenIds === "string") {
     try { tokenIds = JSON.parse(tokenIds); } catch { tokenIds = []; }
   }
@@ -187,8 +187,8 @@ async function executeTask(task) {
     return;
   }
 
-  // 加载任务 ID 列表
-  let taskIds = task.task_ids;
+  // 加载 selected_tasks（任务 ID 列表）
+  let taskIds = task.selected_tasks;
   if (typeof taskIds === "string") {
     try { taskIds = JSON.parse(taskIds); } catch { taskIds = []; }
   }
