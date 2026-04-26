@@ -385,6 +385,13 @@ app.post("/api/tokens", async (req, res) => {
   res.json(data);
 });
 
+// 更新 token
+app.patch("/api/tokens/:id", async (req, res) => {
+  const { data, error } = await supabase.from("tokens").update(req.body).eq("id", req.params.id).select();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+});
+
 // 删除 token
 app.delete("/api/tokens/:id", async (req, res) => {
   const { error } = await supabase.from("tokens").delete().eq("id", req.params.id);
