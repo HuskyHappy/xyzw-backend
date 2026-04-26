@@ -282,9 +282,8 @@ async function executeTask(task) {
     await sleep(2000);
   }
 
-  // 任务完成，不更新额外字段
-
   addLog("INFO", "task", `任务完成: ${task.name}`, { taskId: task.id });
+  processQueue();
 }
 
 // ==================== 记录日志到 Supabase ====================
@@ -302,8 +301,100 @@ async function logToDb(taskId, tokenName, taskType, status, message) {
   }
 }
 
+// ==================== 维护窗口（北京时间） ====================
+// 周六 19:45 - 20:15 和 周日 19:45 - 21:35 禁止所有任务执行
+const MAINTENANCE_WINDOWS = [
+  { dayOfWeek: 6, startHour: 19, startMin: 45, endHour: 20, endMin: 15 }, // 周六
+  { dayOfWeek: 0, startHour: 19, startMin: 45, endHour: 21, endMin: 35 }, // 周日
+];
+
+function isInMaintenanceWindow(beijingNow) {
+  const day = beijingNow.getDay(); // 0=周日, 6=周六
+  const hour = beijingNow.getHours();
+  const min = beijingNow.getMinutes();
+
+  for (const win of MAINTENANCE_WINDOWS) {
+    if (win.dayOfWeek !== day) continue;
+    const startMin = win.startHour * 60 + win.startMin;
+    const endMin = win.endHour * 60 + win.endMin;
+    const nowMin = hour * 60 + min;
+    if (nowMin >= startMin && nowMin < endMin) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function getBeijingTime() {
+  const now = new Date();
+  // 北京时间 = UTC+8
+  return new Date(now.getTime() + 8 * 60 * 60 * 1000);
+}
+
+// ==================== 任务执行队列 ====================
+// pendingQueue: 待执行的队列（等待上一个任务完成）
+const pendingQueue = [];
+// runningTasks: 正在执行的任务 ID 集合
+const runningTasks = new Set();
+
+async function enqueueTask(task) {
+  // 检查是否已在运行
+  if (runningTasks.has(task.id)) {
+    addLog("WARN", "queue", `任务 ${task.name} 正在执行中，跳过此次触发`, { taskId: task.id });
+    return;
+  }
+
+  // 检查维护窗口
+  const bt = getBeijingTime();
+  if (isInMaintenanceWindow(bt)) {
+    addLog("WARN", "queue", `任务 ${task.name} 在维护窗口期，跳过: ${bt.toISOString().replace("T", " ").slice(0, 16)}`, { taskId: task.id });
+    return;
+  }
+
+  // 如果没有任务在运行，立即执行
+  if (runningTasks.size === 0) {
+    runningTasks.add(task.id);
+    await executeTask(task);
+    runningTasks.delete(task.id);
+    processQueue();
+  } else {
+    // 加入等待队列，等待60秒后执行
+    addLog("INFO", "queue", `任务 ${task.name} 加入等待队列（当前有 ${runningTasks.size} 个任务在执行）`, { taskId: task.id });
+    pendingQueue.push({
+      task,
+      scheduledAt: Date.now(),
+      executeAt: Date.now() + 60 * 1000, // 60秒后
+    });
+  }
+}
+
+function processQueue() {
+  // 检查等待队列
+  if (pendingQueue.length === 0) return;
+  const now = Date.now();
+
+  // 找到已到执行时间的任务
+  const ready = pendingQueue.filter((item) => item.executeAt <= now);
+  if (ready.length > 0 && runningTasks.size === 0) {
+    const item = ready[0];
+    // 从队列移除
+    const idx = pendingQueue.findIndex((i) => i === item);
+    if (idx !== -1) pendingQueue.splice(idx, 1);
+
+    addLog("INFO", "queue", `等待任务 ${item.task.name} 开始执行（已等待 ${Math.round((now - item.scheduledAt) / 1000)}s）`, { taskId: item.task.id });
+    runningTasks.add(item.task.id);
+    executeTask(item.task)
+      .catch((err) => addLog("ERROR", "queue", `等待任务执行异常: ${item.task.name}`, { error: err.message }))
+      .finally(() => {
+        runningTasks.delete(item.task.id);
+        processQueue();
+      });
+  }
+}
+
 // ==================== 定时任务调度 ====================
 const cronJobs = new Map();
+const taskSnapshot = new Map(); // 缓存任务快照，避免闭包引用过期
 
 async function registerAllCrons() {
   // 停止旧的
@@ -316,6 +407,11 @@ async function registerAllCrons() {
     .eq("enabled", true);
 
   if (!tasks) return;
+
+  // 更新快照
+  for (const task of tasks) {
+    taskSnapshot.set(task.id, task);
+  }
 
   for (const task of tasks) {
     registerCron(task);
@@ -332,11 +428,13 @@ function registerCron(task) {
 
   try {
     const job = cron.schedule(task.cron_expr, () => {
-      executeTask(task).catch((err) => {
-        addLog("ERROR", "cron", `任务执行异常: ${task.name}`, { error: err.message });
-      });
+      // 每次触发时从快照获取最新任务数据（确保 enabled/cron_expr 是最新的）
+      const freshTask = taskSnapshot.get(task.id);
+      if (!freshTask) return;
+      enqueueTask(freshTask);
     });
     cronJobs.set(task.id, job);
+    taskSnapshot.set(task.id, task);
     addLog("INFO", "cron", `注册定时任务: ${task.name} (${task.cron_expr})`);
   } catch (err) {
     addLog("ERROR", "cron", `注册失败: ${task.name}`, { error: err.message });
@@ -366,8 +464,12 @@ app.get("/health", (req, res) => {
   res.json({
     status: "ok",
     time: new Date().toISOString(),
+    beijingTime: getBeijingTime().toISOString().replace("T", " ").slice(0, 19),
     activeCrons: cronJobs.size,
+    runningTasks: [...runningTasks],
+    queueLength: pendingQueue.length,
     logsInMemory: logs.length,
+    maintenanceWindow: isInMaintenanceWindow(getBeijingTime()),
   });
 });
 
@@ -438,10 +540,8 @@ app.post("/api/tasks/:id/run", async (req, res) => {
   const { data: task } = await supabase.from("cron_tasks").select("*").eq("id", req.params.id).single();
   if (!task) return res.status(404).json({ error: "任务不存在" });
 
-  // 异步执行，不阻塞
-  executeTask(task).catch((err) => {
-    addLog("ERROR", "api", `手动执行失败: ${err.message}`);
-  });
+  // 异步执行，走队列管理
+  enqueueTask(task);
 
   res.json({ status: "running", task: task.name });
 });
