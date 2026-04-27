@@ -379,6 +379,66 @@ async function loadTokens() {
 async function executeTask(task) {
   addLog("INFO", "task", `开始执行任务: ${task.name}`, { taskId: task.id });
 
+  // 解析 settings（包含模板设置和 batchSettings）
+  let taskSettings = {};
+  if (task.settings) {
+    try {
+      taskSettings = typeof task.settings === "string" ? JSON.parse(task.settings) : task.settings;
+    } catch (e) {
+      addLog("WARN", "task", "解析 settings 失败，使用默认值", { taskId: task.id });
+    }
+  }
+
+  // 从 Supabase 获取最新的批量设置（实时读取，不依赖快照）
+  let liveBatchSettings = {};
+  try {
+    const { data: bsData } = await supabase
+      .from("app_settings")
+      .select("*")
+      .eq("key", "batch_settings")
+      .single();
+    if (bsData?.value) liveBatchSettings = bsData.value;
+  } catch (e) {
+    addLog("WARN", "task", "读取全局设置失败，使用任务快照", { taskId: task.id });
+  }
+
+  // 合并：任务 settings 中的 batchSettings 优先，回退到全局设置
+  const bs = { ...liveBatchSettings, ...(taskSettings.batchSettings || {}) };
+  const cmdDelay = bs.commandDelay || 800;
+  const connTimeout = bs.connectionTimeout || 15000;
+
+  // 如果有 templateId，从 Supabase 获取最新模板设置（实时读取）
+  let liveTemplateSettings = {};
+  const templateId = taskSettings.templateId;
+  if (templateId) {
+    try {
+      const { data: tmpl } = await supabase
+        .from("task_templates")
+        .select("*")
+        .eq("id", templateId)
+        .single();
+      if (tmpl?.settings) liveTemplateSettings = tmpl.settings;
+      addLog("INFO", "task", `从 Supabase 加载模板: ${tmpl?.name || templateId}`, { taskId: task.id });
+    } catch (e) {
+      addLog("WARN", "task", `读取模板失败 (${templateId})，使用快照`, { taskId: task.id });
+    }
+  }
+
+  // 合并：实时模板设置 优先，回退到任务 settings 中的模板字段
+  const templateSettings = {
+    arenaFormation: liveTemplateSettings.arenaFormation || taskSettings.arenaFormation || 1,
+    towerFormation: liveTemplateSettings.towerFormation || taskSettings.towerFormation || 1,
+    bossFormation: liveTemplateSettings.bossFormation || taskSettings.bossFormation || 1,
+    bossTimes: liveTemplateSettings.bossTimes !== undefined ? liveTemplateSettings.bossTimes : (taskSettings.bossTimes !== undefined ? taskSettings.bossTimes : 2),
+    claimBottle: liveTemplateSettings.claimBottle !== undefined ? liveTemplateSettings.claimBottle : (taskSettings.claimBottle !== false),
+    claimHangUp: liveTemplateSettings.claimHangUp !== undefined ? liveTemplateSettings.claimHangUp : (taskSettings.claimHangUp !== false),
+    arenaEnable: liveTemplateSettings.arenaEnable !== undefined ? liveTemplateSettings.arenaEnable : (taskSettings.arenaEnable !== false),
+    openBox: liveTemplateSettings.openBox !== undefined ? liveTemplateSettings.openBox : (taskSettings.openBox !== false),
+    claimEmail: liveTemplateSettings.claimEmail !== undefined ? liveTemplateSettings.claimEmail : (taskSettings.claimEmail !== false),
+    blackMarketPurchase: liveTemplateSettings.blackMarketPurchase !== undefined ? liveTemplateSettings.blackMarketPurchase : (taskSettings.blackMarketPurchase !== false),
+    payRecruit: liveTemplateSettings.payRecruit !== undefined ? liveTemplateSettings.payRecruit : (taskSettings.payRecruit !== false),
+  };
+
   // 加载 selected_tokens（Supabase 存的是 UUID 列表）
   let tokenIds = task.selected_tokens;
   if (typeof tokenIds === "string") {
@@ -430,8 +490,8 @@ async function executeTask(task) {
     const client = new GameClient(tokenData, token.ws_url);
 
     try {
-      // 连接
-      await client.connect(15000);
+      // 连接（使用 settings 中的超时时间）
+      await client.connect(connTimeout);
 
       // 先获取角色信息
       try {
@@ -450,7 +510,8 @@ async function executeTask(task) {
           cmdResults.push({ cmd: tid, success: false, error: "未知任务" });
           continue;
         }
-        const results = await client.executeBatch(taskDef.commands, 800);
+        // 使用 settings 中的命令延迟
+        const results = await client.executeBatch(taskDef.commands, cmdDelay);
         cmdResults.push(...results);
       }
 
@@ -473,13 +534,13 @@ async function executeTask(task) {
       });
     } catch (err) {
       addLog("ERROR", "task", `执行失败 (${token.name}): ${err.message}`, { taskId: task.id });
-      await logToDb(task.id, token.name, taskDef.name, "error", err.message);
+      await logToDb(task.id, token.name, "batch", "error", err.message);
     } finally {
       client.disconnect();
     }
 
-    // 角色之间间隔 2 秒
-    await sleep(2000);
+    // 角色之间间隔（使用 settings 中的 taskDelay，默认 2000）
+    await sleep(bs.taskDelay || 2000);
   }
 
   addLog("INFO", "task", `任务完成: ${task.name}`, { taskId: task.id });
@@ -775,6 +836,87 @@ app.get("/api/task-definitions", (req, res) => {
     commands: val.commands.map((c) => c.cmd),
   }));
   res.json(list);
+});
+
+// ==================== 模板 API ====================
+app.get("/api/templates", async (req, res) => {
+  const { data, error } = await supabase.from("task_templates").select("*").order("created_at");
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post("/api/templates", async (req, res) => {
+  const { id, name, settings } = req.body;
+  if (!name) return res.status(400).json({ error: "模板名称不能为空" });
+  const { data, error } = await supabase
+    .from("task_templates")
+    .upsert({ id: id || Date.now().toString(), name, settings: settings || {} }, { onConflict: "id" })
+    .select();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+});
+
+app.patch("/api/templates/:id", async (req, res) => {
+  const { name, settings } = req.body;
+  const updates = { updated_at: new Date().toISOString() };
+  if (name !== undefined) updates.name = name;
+  if (settings !== undefined) updates.settings = settings;
+  const { data, error } = await supabase
+    .from("task_templates")
+    .update(updates)
+    .eq("id", req.params.id)
+    .select();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+});
+
+app.delete("/api/templates/:id", async (req, res) => {
+  const { error } = await supabase.from("task_templates").delete().eq("id", req.params.id);
+  if (error) return res.status(400).json({ error: error.message });
+  res.json({ ok: true });
+});
+
+// ==================== 全局设置 API ====================
+app.get("/api/settings/:key", async (req, res) => {
+  const { data, error } = await supabase
+    .from("app_settings")
+    .select("*")
+    .eq("key", req.params.key)
+    .single();
+  if (error && error.code === "PGRST116") {
+    // 不存在则返回空默认值
+    return res.json({ key: req.params.key, value: {} });
+  }
+  if (error) return res.status(500).json({ error: error.message });
+  res.json(data);
+});
+
+app.post("/api/settings/:key", async (req, res) => {
+  const { value } = req.body;
+  const { data, error } = await supabase
+    .from("app_settings")
+    .upsert(
+      { key: req.params.key, value: value || {}, updated_at: new Date().toISOString() },
+      { onConflict: "key" }
+    )
+    .select();
+  if (error) return res.status(400).json({ error: error.message });
+  res.json(data);
+});
+
+// ==================== 获取合并设置（任务执行时调用） ====================
+app.get("/api/settings/merged", async (req, res) => {
+  try {
+    const { data: bsData } = await supabase
+      .from("app_settings")
+      .select("*")
+      .eq("key", "batch_settings")
+      .single();
+    const batchSettings = bsData?.value || {};
+    res.json({ batchSettings });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // 测试连接单个 token（调试用）
