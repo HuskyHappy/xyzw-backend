@@ -877,6 +877,21 @@ app.delete("/api/templates/:id", async (req, res) => {
 });
 
 // ==================== 全局设置 API ====================
+// 注意：/api/settings/merged 必须在 :key 之前
+app.get("/api/settings/merged", async (req, res) => {
+  try {
+    const { data: bsData } = await supabase
+      .from("app_settings")
+      .select("*")
+      .eq("key", "batch_settings")
+      .single();
+    const batchSettings = bsData?.value || {};
+    res.json({ batchSettings });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 app.get("/api/settings/:key", async (req, res) => {
   const { data, error } = await supabase
     .from("app_settings")
@@ -902,21 +917,6 @@ app.post("/api/settings/:key", async (req, res) => {
     .select();
   if (error) return res.status(400).json({ error: error.message });
   res.json(data);
-});
-
-// ==================== 获取合并设置（任务执行时调用） ====================
-app.get("/api/settings/merged", async (req, res) => {
-  try {
-    const { data: bsData } = await supabase
-      .from("app_settings")
-      .select("*")
-      .eq("key", "batch_settings")
-      .single();
-    const batchSettings = bsData?.value || {};
-    res.json({ batchSettings });
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
 });
 
 // 测试连接单个 token（调试用）
