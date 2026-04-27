@@ -145,6 +145,192 @@ const TASK_DEFINITIONS = {
       { cmd: "legacy_claimhangup", params: {} },
     ],
   },
+
+  // ==================== 前端 availableTasks 对应的任务 ====================
+  // 日常任务（批量执行多个日常操作）
+  startBatch: {
+    name: "日常任务",
+    commands: [
+      { cmd: "system_signinreward", params: {} },
+      { cmd: "system_claimhangupreward", params: {} },
+      { cmd: "task_claimdailyreward", params: { rewardId: 0 } },
+      { cmd: "mail_claimallattachment", params: { category: 0 } },
+    ],
+  },
+  // 领取挂机奖励
+  claimHangUpRewards: {
+    name: "领取挂机",
+    commands: [{ cmd: "system_claimhangupreward", params: {} }],
+  },
+  // 一键加钟
+  batchAddHangUpTime: {
+    name: "一键加钟",
+    commands: [{ cmd: "hangup_addtime", params: {} }],
+  },
+  // 重置罐子
+  resetBottles: {
+    name: "重置罐子",
+    commands: [{ cmd: "bottle_reset", params: {} }],
+  },
+  // 一键领取罐子
+  batchlingguanzi: {
+    name: "一键领取罐子",
+    commands: [{ cmd: "bottle_claimall", params: {} }],
+  },
+  // 一键爬塔（使用已有的 climbTower）
+  // 一键爬怪异塔（使用已有的 climbWeirdTower）
+  // 一键答题
+  batchStudy: {
+    name: "一键答题",
+    commands: [{ cmd: "study_startgame", params: {} }],
+  },
+  // 智能发车
+  batchSmartSendCar: {
+    name: "智能发车",
+    commands: [{ cmd: "car_smartsend", params: {} }],
+  },
+  // 一键收车
+  batchClaimCars: {
+    name: "一键收车",
+    commands: [{ cmd: "car_getrolecar", params: {} }],
+  },
+  // 批量开箱
+  batchOpenBox: {
+    name: "批量开箱",
+    commands: [{ cmd: "item_openbox", params: { itemId: 2001, number: 10 } }],
+  },
+  // 按积分开箱
+  batchOpenBoxByPoints: {
+    name: "按积分开箱",
+    commands: [{ cmd: "item_openboxbypoint", params: {} }],
+  },
+  // 领取宝箱积分
+  batchClaimBoxPointReward: {
+    name: "领取宝箱积分",
+    commands: [{ cmd: "boxpoint_claimreward", params: {} }],
+  },
+  // 批量钓鱼
+  batchFish: {
+    name: "批量钓鱼",
+    commands: [{ cmd: "fish_start", params: { rodId: 1 } }],
+  },
+  // 批量招募
+  batchRecruit: {
+    name: "批量招募",
+    commands: [{ cmd: "hero_recruit", params: { byClub: false, recruitNumber: 1, recruitType: 3 } }],
+  },
+  // 一键宝库前3层
+  batchbaoku13: {
+    name: "一键宝库前3层",
+    commands: [
+      { cmd: "bosstower_getinfo", params: {} },
+      { cmd: "bosstower_startboss", params: { floor: 1 } },
+      { cmd: "bosstower_startboss", params: { floor: 2 } },
+      { cmd: "bosstower_startboss", params: { floor: 3 } },
+    ],
+  },
+  // 一键宝库4,5层
+  batchbaoku45: {
+    name: "一键宝库4,5层",
+    commands: [
+      { cmd: "bosstower_getinfo", params: {} },
+      { cmd: "bosstower_startboss", params: { floor: 4 } },
+      { cmd: "bosstower_startboss", params: { floor: 5 } },
+    ],
+  },
+  // 一键梦境
+  batchmengjing: {
+    name: "一键梦境",
+    commands: [{ cmd: "dream_sweep", params: {} }],
+  },
+  // 一键俱乐部签到
+  batchclubsign: {
+    name: "一键俱乐部签到",
+    commands: [
+      { cmd: "legion_getinfo", params: {} },
+      { cmd: "legion_signin", params: {} },
+    ],
+  },
+  // 一键竞技场战斗3次
+  batcharenafight: {
+    name: "一键竞技场战斗",
+    commands: [
+      { cmd: "arena_startarea", params: {} },
+      { cmd: "arena_getareatarget", params: { refresh: false } },
+      { cmd: "arena_getareatarget", params: { refresh: false } },
+      { cmd: "arena_getareatarget", params: { refresh: false } },
+    ],
+  },
+  // 一键钓鱼补齐
+  batchTopUpFish: {
+    name: "一键钓鱼补齐",
+    commands: [{ cmd: "fish_topup", params: {} }],
+  },
+  // 一键竞技场补齐
+  batchTopUpArena: {
+    name: "一键竞技场补齐",
+    commands: [{ cmd: "arena_topup", params: {} }],
+  },
+  // 一键领取怪异塔免费道具
+  batchClaimFreeEnergy: {
+    name: "一键领取怪异塔免费道具",
+    commands: [{ cmd: "evotower_claimfreeenergy", params: {} }],
+  },
+  // 一键换皮闯关
+  skinChallenge: {
+    name: "一键换皮闯关",
+    commands: [{ cmd: "skin_challenge", params: {} }],
+  },
+  // 一键购买四圣碎片
+  legion_storebuygoods: {
+    name: "一键购买四圣碎片",
+    commands: [{ cmd: "legion_storebuygoods", params: { goodsId: 1 } }],
+  },
+  // 一键黑市采购
+  store_purchase: {
+    name: "一键黑市采购",
+    commands: [{ cmd: "store_purchase", params: { storeId: 1, goodsId: 1 } }],
+  },
+  // 免费领取珍宝阁
+  collection_claimfreereward: {
+    name: "免费领取珍宝阁",
+    commands: [{ cmd: "collection_claimfreereward", params: {} }],
+  },
+  // 批量领取功法残卷
+  batchLegacyClaim: {
+    name: "批量领取功法残卷",
+    commands: [{ cmd: "legacy_getinfo", params: {} }, { cmd: "legacy_claimhangup", params: {} }],
+  },
+  // 批量赠送功法残卷
+  batchLegacyGiftSendEnhanced: {
+    name: "批量赠送功法残卷",
+    commands: [{ cmd: "legacy_giftsend", params: {} }],
+  },
+  // 一键使用怪异塔道具
+  batchUseItems: {
+    name: "一键使用怪异塔道具",
+    commands: [{ cmd: "item_use", params: { itemId: 3001, number: 1 } }],
+  },
+  // 一键怪异塔合成
+  batchMergeItems: {
+    name: "一键怪异塔合成",
+    commands: [{ cmd: "item_merge", params: {} }],
+  },
+  // 一键领取蟠桃园任务
+  batchClaimPeachTasks: {
+    name: "一键领取蟠桃园任务",
+    commands: [{ cmd: "peach_claimtasks", params: {} }],
+  },
+  // 一键扫荡灯神
+  batchGenieSweep: {
+    name: "一键扫荡灯神",
+    commands: [{ cmd: "genie_sweep", params: { genieId: 1 } }],
+  },
+  // 一键购买梦境商品
+  batchBuyDreamItems: {
+    name: "一键购买梦境商品",
+    commands: [{ cmd: "dream_buyitem", params: { itemId: 1 } }],
+  },
 };
 
 // ==================== 日志存储（内存，保留最近500条） ====================
