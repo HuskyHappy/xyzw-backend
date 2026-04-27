@@ -157,25 +157,39 @@ const TASK_DEFINITIONS = {
       { cmd: "mail_claimallattachment", params: { category: 0 } },
     ],
   },
-  // 领取挂机奖励
+  // 领取挂机奖励（领取 + 加钟 4 次）
   claimHangUpRewards: {
     name: "领取挂机",
-    commands: [{ cmd: "system_claimhangupreward", params: {} }],
+    commands: [
+      { cmd: "system_claimhangupreward", params: {} },
+      { cmd: "system_mysharecallback", params: { isSkipShareCard: true, type: 2 } },
+      { cmd: "system_mysharecallback", params: { isSkipShareCard: true, type: 2 } },
+      { cmd: "system_mysharecallback", params: { isSkipShareCard: true, type: 2 } },
+      { cmd: "system_mysharecallback", params: { isSkipShareCard: true, type: 2 } },
+    ],
   },
-  // 一键加钟
+  // 一键加钟（加钟 4 次）
   batchAddHangUpTime: {
     name: "一键加钟",
-    commands: [{ cmd: "hangup_addtime", params: {} }],
+    commands: [
+      { cmd: "system_mysharecallback", params: { isSkipShareCard: true, type: 2 } },
+      { cmd: "system_mysharecallback", params: { isSkipShareCard: true, type: 2 } },
+      { cmd: "system_mysharecallback", params: { isSkipShareCard: true, type: 2 } },
+      { cmd: "system_mysharecallback", params: { isSkipShareCard: true, type: 2 } },
+    ],
   },
-  // 重置罐子
+  // 重置罐子（停止计时+开始计时）
   resetBottles: {
     name: "重置罐子",
-    commands: [{ cmd: "bottle_reset", params: {} }],
+    commands: [
+      { cmd: "bottlehelper_stop", params: {} },
+      { cmd: "bottlehelper_start", params: {} },
+    ],
   },
   // 一键领取罐子
   batchlingguanzi: {
     name: "一键领取罐子",
-    commands: [{ cmd: "bottle_claimall", params: {} }],
+    commands: [{ cmd: "bottlehelper_claim", params: {} }],
   },
   // 一键爬塔（使用已有的 climbTower）
   // 一键爬怪异塔（使用已有的 climbWeirdTower）
