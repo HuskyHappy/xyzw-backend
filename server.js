@@ -627,11 +627,14 @@ function registerCron(task) {
   if (!task.enabled || !task.cron_expr) return;
 
   try {
+    // 使用北京时间时区，cron 表达式按北京时间解析
     const job = cron.schedule(task.cron_expr, () => {
       // 每次触发时从快照获取最新任务数据（确保 enabled/cron_expr 是最新的）
       const freshTask = taskSnapshot.get(task.id);
       if (!freshTask) return;
       enqueueTask(freshTask);
+    }, {
+      timezone: "Asia/Shanghai"
     });
     cronJobs.set(task.id, job);
     taskSnapshot.set(task.id, task);
