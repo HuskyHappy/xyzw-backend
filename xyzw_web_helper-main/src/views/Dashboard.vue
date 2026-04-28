@@ -699,13 +699,13 @@ const tokenSelectColumns = [
     title: () => h('n-checkbox', {
       checked: taskForm.selectedTokens.length === sortedTokens.value.length && sortedTokens.value.length > 0,
       indeterminate: taskForm.selectedTokens.length > 0 && taskForm.selectedTokens.length < sortedTokens.value.length,
-      onUpdate:checked: (v) => { if (v) taskForm.selectedTokens = sortedTokens.value.map(t => t.id); else taskForm.selectedTokens = [] }
+      'onUpdate:checked': (v) => { if (v) taskForm.selectedTokens = sortedTokens.value.map(t => t.id); else taskForm.selectedTokens = [] }
     }),
     key: 'select',
     width: 40,
     render: (row) => h('n-checkbox', {
       checked: taskForm.selectedTokens.includes(row.id),
-      onUpdate:checked: (v) => {
+      'onUpdate:checked': (v) => {
         if (v) { if (!taskForm.selectedTokens.includes(row.id)) taskForm.selectedTokens.push(row.id) }
         else { taskForm.selectedTokens = taskForm.selectedTokens.filter(id => id !== row.id) }
       }
