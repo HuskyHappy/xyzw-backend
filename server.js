@@ -504,6 +504,55 @@ async function executeTask(task) {
       // 逐个执行选中的任务
       const cmdResults = [];
       for (const tid of taskIds) {
+        // startBatch（日常任务）动态读取模板设置
+        if (tid === "startBatch") {
+          const cmds = [];
+          // 签到（无条件执行）
+          cmds.push({ cmd: "system_signinreward", params: {} });
+          // 领取挂机
+          if (templateSettings.claimHangUp) {
+            cmds.push({ cmd: "system_claimhangupreward", params: {} });
+          }
+          // 领取日常奖励
+          cmds.push({ cmd: "task_claimdailyreward", params: { rewardId: 0 } });
+          // 竞技场
+          if (templateSettings.arenaEnable) {
+            cmds.push({ cmd: "batcharenafight", params: { formationId: templateSettings.arenaFormation } });
+          }
+          // 爬塔
+          cmds.push({ cmd: "climbTower", params: { formationId: templateSettings.towerFormation } });
+          // Boss战
+          if (templateSettings.bossTimes > 0) {
+            for (let i = 0; i < templateSettings.bossTimes; i++) {
+              cmds.push({ cmd: "climbTower_challengeboss", params: { formationId: templateSettings.bossFormation } });
+            }
+          }
+          // 领罐子
+          if (templateSettings.claimBottle) {
+            cmds.push({ cmd: "bottlehelper_claim", params: {} });
+          }
+          // 开宝箱
+          if (templateSettings.openBox) {
+            cmds.push({ cmd: "item_openbox", params: { itemId: 2001, number: 10 } });
+          }
+          // 领取邮件
+          if (templateSettings.claimEmail) {
+            cmds.push({ cmd: "mail_claimallattachment", params: { category: 0 } });
+          }
+          // 付费招募
+          if (templateSettings.payRecruit) {
+            cmds.push({ cmd: "payrecruit_recruitone", params: {} });
+          }
+          // 黑市购买
+          if (templateSettings.blackMarketPurchase) {
+            cmds.push({ cmd: "store_buyblackmarketitem", params: {} });
+          }
+          addLog("INFO", "task", `[${token.name}] startBatch 动态命令: ${cmds.length} 条`, { taskId: task.id });
+          const results = await client.executeBatch(cmds, cmdDelay);
+          cmdResults.push(...results);
+          continue;
+        }
+
         const taskDef = TASK_DEFINITIONS[tid];
         if (!taskDef) {
           addLog("WARN", "task", `未知任务: ${tid} (${token.name})`, { taskId: task.id });
@@ -839,10 +888,42 @@ app.get("/api/task-definitions", (req, res) => {
 });
 
 // ==================== 模板 API ====================
+// 默认模板 ID（固定）
+const DEFAULT_TEMPLATE_ID = "default_template";
+const DEFAULT_TEMPLATE_SETTINGS = {
+  arenaFormation: 1,
+  towerFormation: 1,
+  bossFormation: 1,
+  bossTimes: 2,
+  claimBottle: true,
+  payRecruit: true,
+  openBox: true,
+  arenaEnable: true,
+  claimHangUp: true,
+  claimEmail: true,
+  blackMarketPurchase: true
+};
+
+// GET /api/templates：自动确保有默认模板，列表带上 isDefault 标记
 app.get("/api/templates", async (req, res) => {
+  // 检查是否存在默认模板，不存在则自动创建
+  const { data: existing } = await supabase
+    .from("task_templates")
+    .select("id")
+    .eq("id", DEFAULT_TEMPLATE_ID)
+    .single();
+  if (!existing) {
+    await supabase.from("task_templates").upsert({
+      id: DEFAULT_TEMPLATE_ID,
+      name: "默认",
+      settings: DEFAULT_TEMPLATE_SETTINGS
+    });
+  }
   const { data, error } = await supabase.from("task_templates").select("*").order("created_at");
   if (error) return res.status(500).json({ error: error.message });
-  res.json(data);
+  // 标记默认模板
+  const result = data.map(t => ({ ...t, isDefault: t.id === DEFAULT_TEMPLATE_ID }));
+  res.json(result);
 });
 
 app.post("/api/templates", async (req, res) => {
@@ -871,6 +952,9 @@ app.patch("/api/templates/:id", async (req, res) => {
 });
 
 app.delete("/api/templates/:id", async (req, res) => {
+  if (req.params.id === DEFAULT_TEMPLATE_ID) {
+    return res.status(403).json({ error: "默认模板不可删除" });
+  }
   const { error } = await supabase.from("task_templates").delete().eq("id", req.params.id);
   if (error) return res.status(400).json({ error: error.message });
   res.json({ ok: true });
