@@ -11,6 +11,20 @@ const { WebSocket } = require("ws");
 const { GameClient } = require("./lib/gameClient");
 const { bon, encode, parse, getEnc } = require("./lib/bonProtocol");
 
+// ==================== Semaphore（并发控制）====================
+class Semaphore {
+  constructor(max) { this.max = max; this.current = 0; this.queue = []; }
+  async acquire() {
+    if (this.current < this.max) { this.current++; return; }
+    await new Promise((r) => this.queue.push(r));
+  }
+  release() {
+    this.current--;
+    const next = this.queue.shift();
+    if (next) { this.current++; process.nextTick(next); }
+  }
+}
+
 const app = express();
 app.use(cors());
 app.use(express.json());
@@ -469,128 +483,130 @@ async function executeTask(task) {
     return;
   }
 
-  addLog("INFO", "task", `将执行于 ${targetTokens.length} 个角色`, { taskId: task.id });
+  addLog("INFO", "task", `将执行于 ${targetTokens.length} 个角色（并发上限: ${bs.maxActive || 5}）`, { taskId: task.id });
 
-  const taskResults = [];
+  // Semaphore 并发控制
+  const maxActive = bs.maxActive || 5;
+  const sem = new Semaphore(maxActive);
 
-  for (const token of targetTokens) {
-    // 解析 token 数据（Supabase 存的是 JSON 字符串）
-    let tokenData;
+  async function executeToken(token) {
+    await sem.acquire();
     try {
-      tokenData = typeof token.token === "string" && token.token.startsWith("{")
-        ? JSON.parse(token.token)
-        : { roleToken: token.token, roleId: token.roleId, sessId: token.sessId, connId: token.connId, isRestore: token.isRestore };
-    } catch (err) {
-      addLog("ERROR", "task", `Token解析失败: ${token.name}`, { error: err.message });
-      continue;
-    }
-
-    tokenData.name = token.name;
-
-    const client = new GameClient(tokenData, token.ws_url);
-
-    try {
-      // 连接（使用 settings 中的超时时间）
-      await client.connect(connTimeout);
-
-      // 先获取角色信息
+      // 解析 token 数据（Supabase 存的是 JSON 字符串）
+      let tokenData;
       try {
-        await client.sendWithPromise("role_getroleinfo", {}, 8000);
-        await sleep(500);
-      } catch (e) {
-        addLog("WARN", "task", `获取角色信息失败 (${token.name})`, { error: e.message });
+        tokenData = typeof token.token === "string" && token.token.startsWith("{")
+          ? JSON.parse(token.token)
+          : { roleToken: token.token, roleId: token.roleId, sessId: token.sessId, connId: token.connId, isRestore: token.isRestore };
+      } catch (err) {
+        addLog("ERROR", "task", `Token解析失败: ${token.name}`, { error: err.message });
+        return;
       }
 
-      // 逐个执行选中的任务
-      const cmdResults = [];
-      for (const tid of taskIds) {
-        // startBatch（日常任务）动态读取模板设置
-        if (tid === "startBatch") {
-          const cmds = [];
-          // 签到（无条件执行）
-          cmds.push({ cmd: "system_signinreward", params: {} });
-          // 领取挂机
-          if (templateSettings.claimHangUp) {
-            cmds.push({ cmd: "system_claimhangupreward", params: {} });
-          }
-          // 领取日常奖励
-          cmds.push({ cmd: "task_claimdailyreward", params: { rewardId: 0 } });
-          // 竞技场
-          if (templateSettings.arenaEnable) {
-            cmds.push({ cmd: "batcharenafight", params: { formationId: templateSettings.arenaFormation } });
-          }
-          // 爬塔
-          cmds.push({ cmd: "climbTower", params: { formationId: templateSettings.towerFormation } });
-          // Boss战
-          if (templateSettings.bossTimes > 0) {
-            for (let i = 0; i < templateSettings.bossTimes; i++) {
-              cmds.push({ cmd: "climbTower_challengeboss", params: { formationId: templateSettings.bossFormation } });
+      tokenData.name = token.name;
+      const client = new GameClient(tokenData, token.ws_url);
+
+      try {
+        // 连接（使用 settings 中的超时时间）
+        await client.connect(connTimeout);
+
+        // 先获取角色信息
+        try {
+          await client.sendWithPromise("role_getroleinfo", {}, 8000);
+          await sleep(500);
+        } catch (e) {
+          addLog("WARN", "task", `获取角色信息失败 (${token.name})`, { error: e.message });
+        }
+
+        // 逐个执行选中的任务
+        const cmdResults = [];
+        for (const tid of taskIds) {
+          // startBatch（日常任务）动态读取模板设置
+          if (tid === "startBatch") {
+            const cmds = [];
+            // 签到（无条件执行）
+            cmds.push({ cmd: "system_signinreward", params: {} });
+            // 领取挂机
+            if (templateSettings.claimHangUp) {
+              cmds.push({ cmd: "system_claimhangupreward", params: {} });
             }
+            // 领取日常奖励
+            cmds.push({ cmd: "task_claimdailyreward", params: { rewardId: 0 } });
+            // 竞技场
+            if (templateSettings.arenaEnable) {
+              cmds.push({ cmd: "batcharenafight", params: { formationId: templateSettings.arenaFormation } });
+            }
+            // 爬塔
+            cmds.push({ cmd: "climbTower", params: { formationId: templateSettings.towerFormation } });
+            // Boss战
+            if (templateSettings.bossTimes > 0) {
+              for (let i = 0; i < templateSettings.bossTimes; i++) {
+                cmds.push({ cmd: "climbTower_challengeboss", params: { formationId: templateSettings.bossFormation } });
+              }
+            }
+            // 领罐子
+            if (templateSettings.claimBottle) {
+              cmds.push({ cmd: "bottlehelper_claim", params: {} });
+            }
+            // 开宝箱
+            if (templateSettings.openBox) {
+              cmds.push({ cmd: "item_openbox", params: { itemId: 2001, number: 10 } });
+            }
+            // 领取邮件
+            if (templateSettings.claimEmail) {
+              cmds.push({ cmd: "mail_claimallattachment", params: { category: 0 } });
+            }
+            // 付费招募
+            if (templateSettings.payRecruit) {
+              cmds.push({ cmd: "payrecruit_recruitone", params: {} });
+            }
+            // 黑市购买
+            if (templateSettings.blackMarketPurchase) {
+              cmds.push({ cmd: "store_buyblackmarketitem", params: {} });
+            }
+            addLog("INFO", "task", `[${token.name}] startBatch 动态命令: ${cmds.length} 条`, { taskId: task.id });
+            const results = await client.executeBatch(cmds, cmdDelay);
+            cmdResults.push(...results);
+            continue;
           }
-          // 领罐子
-          if (templateSettings.claimBottle) {
-            cmds.push({ cmd: "bottlehelper_claim", params: {} });
+
+          const taskDef = TASK_DEFINITIONS[tid];
+          if (!taskDef) {
+            addLog("WARN", "task", `未知任务: ${tid} (${token.name})`, { taskId: task.id });
+            cmdResults.push({ cmd: tid, success: false, error: "未知任务" });
+            continue;
           }
-          // 开宝箱
-          if (templateSettings.openBox) {
-            cmds.push({ cmd: "item_openbox", params: { itemId: 2001, number: 10 } });
-          }
-          // 领取邮件
-          if (templateSettings.claimEmail) {
-            cmds.push({ cmd: "mail_claimallattachment", params: { category: 0 } });
-          }
-          // 付费招募
-          if (templateSettings.payRecruit) {
-            cmds.push({ cmd: "payrecruit_recruitone", params: {} });
-          }
-          // 黑市购买
-          if (templateSettings.blackMarketPurchase) {
-            cmds.push({ cmd: "store_buyblackmarketitem", params: {} });
-          }
-          addLog("INFO", "task", `[${token.name}] startBatch 动态命令: ${cmds.length} 条`, { taskId: task.id });
-          const results = await client.executeBatch(cmds, cmdDelay);
+          // 使用 settings 中的命令延迟
+          const results = await client.executeBatch(taskDef.commands, cmdDelay);
           cmdResults.push(...results);
-          continue;
         }
 
-        const taskDef = TASK_DEFINITIONS[tid];
-        if (!taskDef) {
-          addLog("WARN", "task", `未知任务: ${tid} (${token.name})`, { taskId: task.id });
-          cmdResults.push({ cmd: tid, success: false, error: "未知任务" });
-          continue;
+        // 记录结果
+        for (const r of cmdResults) {
+          const logLevel = r.success ? "INFO" : "ERROR";
+          addLog(logLevel, "task", `[${token.name}] ${r.cmd}: ${r.success ? "OK" : r.error}`, { taskId: task.id });
+          await logToDb(task.id, token.name, r.cmd, r.success ? "success" : "error", r.success ? undefined : r.error);
         }
-        // 使用 settings 中的命令延迟
-        const results = await client.executeBatch(taskDef.commands, cmdDelay);
-        cmdResults.push(...results);
+
+        addLog("INFO", "task", `角色 ${token.name} 任务完成`, {
+          taskId: task.id,
+          successCount: cmdResults.filter((r) => r.success).length,
+          failCount: cmdResults.filter((r) => !r.success).length,
+        });
+      } catch (err) {
+        addLog("ERROR", "task", `执行失败 (${token.name}): ${err.message}`, { taskId: task.id });
+        await logToDb(task.id, token.name, "batch", "error", err.message);
+      } finally {
+        client.disconnect();
       }
-
-      // 记录结果
-      for (const r of cmdResults) {
-        const logLevel = r.success ? "INFO" : "ERROR";
-        addLog(logLevel, "task", `[${token.name}] ${r.cmd}: ${r.success ? "OK" : r.error}`, { taskId: task.id });
-        await logToDb(task.id, token.name, r.cmd, r.success ? "success" : "error", r.success ? undefined : r.error);
-
-        // 保存角色信息到 Supabase（如果需要）
-        if (r.success && r.data?.role) {
-          // 可以在这里更新角色信息
-        }
-      }
-
-      addLog("INFO", "task", `角色 ${token.name} 任务完成`, {
-        taskId: task.id,
-        successCount: cmdResults.filter((r) => r.success).length,
-        failCount: cmdResults.filter((r) => !r.success).length,
-      });
-    } catch (err) {
-      addLog("ERROR", "task", `执行失败 (${token.name}): ${err.message}`, { taskId: task.id });
-      await logToDb(task.id, token.name, "batch", "error", err.message);
     } finally {
-      client.disconnect();
+      // 角色之间间隔（使用 settings 中的 taskDelay，默认 2000）
+      await sleep(bs.taskDelay || 2000);
+      sem.release();
     }
-
-    // 角色之间间隔（使用 settings 中的 taskDelay，默认 2000）
-    await sleep(bs.taskDelay || 2000);
   }
+
+  await Promise.all(targetTokens.map(executeToken));
 
   addLog("INFO", "task", `任务完成: ${task.name}`, { taskId: task.id });
   processQueue();
