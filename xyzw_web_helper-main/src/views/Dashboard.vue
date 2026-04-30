@@ -5,7 +5,7 @@
       <n-gi>
         <n-card>
           <n-statistic label="后端状态">
-            <template #prefix>
+            <template #icon>
               <n-icon :color="backendOnline ? '#18a058' : '#d03050'">
                 <CheckmarkCircle v-if="backendOnline" />
                 <CloseCircle v-else />
@@ -34,8 +34,7 @@
       <template #header-extra>
         <n-space>
           <n-button type="info" size="small" @click="openTemplateManagerModal">任务模板</n-button>
-          <n-button size="small" @click="openBatchSettings">
-            <template #icon><n-icon><Settings /></n-icon></template>
+          <n-button size="small" @click="openBatchSettings" :icon="() => h(NIcon, null, { default: () => h(Settings) })">
             任务设置
           </n-button>
           <n-button type="primary" @click="openTaskModal">新增定时任务</n-button>
@@ -91,7 +90,6 @@
               <n-time-picker v-if="taskForm.runType === 'daily'" v-model:value="taskForm.runTime" format="HH:mm" />
               <n-input v-if="taskForm.runType === 'cron'" v-model:value="taskForm.cronExpression" placeholder="分 时 日 月 周（例：30 2 * * *）" style="flex:1" @input="parseCronExpression" />
             </div>
-          </div>
             <!-- Cron表达式解析结果 -->
             <div class="cron-parser" v-if="taskForm.runType === 'cron' && taskForm.cronExpression">
               <div v-if="cronValidation.valid" class="cron-validation success">
