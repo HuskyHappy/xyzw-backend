@@ -81,13 +81,19 @@
         </div>
       </a-modal>
 
-      <!-- 返回首页 -->
-      <div v-if="tokenStore.hasTokens" style="margin-bottom: 8px">
-        <n-button type="primary" size="small" @click="router.push('/admin/dashboard')">
+      <!-- 返回首页 + 批量日常 -->
+        <div v-if="tokenStore.hasTokens" style="margin-bottom: 8px; display: flex; gap: 8px; align-items: center; flex-wrap: wrap;">
+        <n-button type="primary" size="medium" @click="router.push('/admin/dashboard')">
           <template #icon>
             <n-icon><Home /></n-icon>
           </template>
           返回首页
+        </n-button>
+        <n-button type="primary" size="medium" @click="router.push('/admin/batch-daily-tasks')">
+          <template #icon>
+            <n-icon><Menu /></n-icon>
+          </template>
+          批量日常
         </n-button>
       </div>
 
@@ -100,12 +106,30 @@
               <template #icon><n-icon><Add /></n-icon></template>
               添加Token
             </n-button>
-            <n-dropdown :options="bulkOptions" @select="handleBulkAction">
-              <n-button>
-                <template #icon><n-icon><Menu /></n-icon></template>
-                批量操作
-              </n-button>
-            </n-dropdown>
+            <n-button size="small" @click="refreshAllTokens" title="刷新所有Token">
+              <template #icon><n-icon><Refresh /></n-icon></template>
+              刷新所有
+            </n-button>
+            <n-button size="small" @click="updateAllTokenInfo" title="更新所有Token信息">
+              <template #icon><n-icon><SyncCircle /></n-icon></template>
+              更新信息
+            </n-button>
+            <n-button size="small" @click="exportTokens" title="导出Token">
+              <template #icon><n-icon><Add /></n-icon></template>
+              导出
+            </n-button>
+            <n-button size="small" @click="importTokenFile" title="导入Token">
+              <template #icon><n-icon><Add /></n-icon></template>
+              导入
+            </n-button>
+            <n-button size="small" @click="connectAll" title="顺序连接所有账号" :loading="connectingAll">
+              <template #icon><n-icon><Connect /></n-icon></template>
+              全部连接
+            </n-button>
+            <n-button size="small" type="error" @click="clearSelectedTokens" :disabled="selectedTokenIds.length === 0" title="清除已选Token">
+              <template #icon><n-icon><TrashBin /></n-icon></template>
+              清除选择
+            </n-button>
           </div>
         </div>
 
@@ -115,12 +139,13 @@
             :data="sortedTokens"
             :bordered="false"
             :row-key="(row) => row.id"
-            :pagination="{ pageSize: 20 }"
             :checked-row-keys="selectedTokenIds"
             @update:checked-row-keys="(keys) => (selectedTokenIds = keys)"
+            :row-props="rowProps"
             size="small"
           />
         </div>
+      </div>
 
       <!-- 空状态 -->
       <a-empty v-if="!tokenStore.hasTokens && !showImportForm">
@@ -306,9 +331,38 @@ const sortedTokens = computed(() => {
     }
     return 0;
   });
+});
 
 // 选中状态
 const selectedTokenIds = ref([]);
+
+// 行点击连接功能
+const rowProps = (row) => {
+  return {
+    style: 'cursor: pointer',
+    onClick: (e) => {
+      // 排除checkbox、按钮、链接的点击
+      if (e.target.closest('.n-checkbox') || e.target.closest('.n-button') || e.target.closest('a')) {
+        return;
+      }
+      handleRowClick(row);
+    },
+  };
+};
+
+const handleRowClick = (row) => {
+  const status = tokenStore.getWebSocketStatus(row.id);
+  if (status === 'connected') {
+    message.info(`${row.name} 已连接`);
+    return;
+  }
+  if (status === 'connecting') {
+    message.info(`${row.name} 正在连接中...`);
+    return;
+  }
+  tokenStore.createWebSocketConnection(row.id, row.token, row.wsUrl);
+  message.info(`正在连接 ${row.name}...`);
+};
 
 // 表格列定义
 const tokenTableColumns = [
@@ -325,12 +379,29 @@ const tokenTableColumns = [
   {
     title: '连接状态',
     key: 'status',
-    width: 100,
+    width: 120,
     render: (row) => {
       const status = tokenStore.getWebSocketStatus(row.id);
-      const map = { connected: ['#18a058', '已连接'], connecting: ['#d03050', '连接中...'], disconnected: ['#d03050', '已断开'], error: ['#d03050', '连接错误'], disconnecting: ['#d03050', '断开中...'] };
-      const s = map[status] || ['#d03050', '未连接'];
-      return h('span', { style: 'font-size:12px;color:' + s[0] }, s[1]);
+      if (status === 'connected') {
+        return h('span', { style: 'font-size:12px;color:#18a058;font-weight:bold' }, '已连接');
+      }
+      if (status === 'connecting') {
+        return h('span', { style: 'font-size:12px;color:#2080f0;display:inline-flex;align-items:center;gap:4px' }, [
+          h('n-spin', { size: 12, stroke: '#2080f0' }),
+          '连接中...',
+        ]);
+      }
+      if (status === 'error') {
+        return h('n-tooltip', {}, {
+          trigger: () => h('span', { style: 'font-size:12px;color:#d03050;cursor:help;border-bottom:1px dashed #d03050' }, '连接失败'),
+          default: () => '连接失败，请点击行重试',
+        });
+      }
+      if (status === 'disconnecting') {
+        return h('span', { style: 'font-size:12px;color:#f0a020' }, '断开中...');
+      }
+      // disconnected / 默认
+      return h('span', { style: 'font-size:12px;color:#999' }, '已断开');
     },
   },
   {
@@ -361,7 +432,6 @@ const tokenTableColumns = [
     render: (row) => h('div', { style: 'display:flex;gap:4px;flex-wrap:nowrap' }, [
       h(NButton, { size: 'tiny', onClick: () => refreshToken(row), loading: refreshingTokens.value.has(row.id) }, { default: () => '刷新' }),
       h(NButton, { size: 'tiny', type: 'primary', loading: connectingTokens.value.has(row.id), onClick: () => startTaskManagement(row) }, { default: () => '控制台' }),
-      h(NButton, { size: 'tiny', onClick: () => startEditRemark(row) }, { default: () => '备注' }),
       h(NButton, { size: 'tiny', onClick: () => copyToken(row) }, { default: () => '复制' }),
       h(NButton, { size: 'tiny', type: 'error', onClick: () => deleteToken(row) }, { default: () => '删除' }),
     ]),
@@ -452,6 +522,33 @@ const bulkOptions = [
   { label: "断开所有连接", key: "disconnect" },
   { label: "清除选择Token", key: "clearSelected" },
 ];
+
+const clearSelectedTokens = () => {
+  if (selectedTokenIds.value.length === 0) {
+    message.warning("请先勾选要清除的Token");
+    return;
+  }
+  const selNames = sortedTokens.value
+    .filter(t => selectedTokenIds.value.includes(t.id))
+    .map(t => t.name);
+  dialog.warning({
+    title: "清除选择Token",
+    content: "确定要清除选中的 " + selectedTokenIds.value.length + " 个Token吗？\n\n已选：" + selNames.join("、"),
+    positiveText: "确定",
+    negativeText: "取消",
+    onPositiveClick: async () => {
+      try {
+        for (const id of selectedTokenIds.value) {
+          await tokenStore.removeToken(id);
+        }
+        selectedTokenIds.value = [];
+        message.success("已清除所选Token");
+      } catch (error) {
+        message.error("清除失败: " + error.message);
+      }
+    },
+  });
+};
 
 /**
  * 手动打开Token管理卡片
@@ -1046,11 +1143,27 @@ const cleanExpiredTokens = async () => {
   message.success(`已清理 ${count} 个过期Token`);
 };
 
-const disconnectAll = () => {
-  tokenStore.gameTokens.forEach((token) => {
-    tokenStore.closeWebSocketConnection(token.id);
-  });
-  message.success("所有连接已断开");
+const connectingAll = ref(false);
+
+const connectAll = async () => {
+  if (connectingAll.value) return;
+  connectingAll.value = true;
+  const tokens = tokenStore.gameTokens;
+  message.info(`开始连接所有账号，共 ${tokens.length} 个...`);
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    try {
+      tokenStore.createWebSocketConnection(token.id, token.token, token.wsUrl);
+      // 等待1秒再连接下一个
+      if (i < tokens.length - 1) {
+        await new Promise(resolve => setTimeout(resolve, 1000));
+      }
+    } catch (e) {
+      console.error(`连接 ${token.name} 失败:`, e);
+    }
+  }
+  connectingAll.value = false;
+  message.success('所有账号已开始连接');
 };
 
 const clearAllTokens = () => {
@@ -1165,7 +1278,7 @@ const startTaskManagement = (token) => {
   tokenStore.selectToken(token.id);
   // 直接跳转到控制台，不等待连接
   message.success(`正在进入 ${token.name} 的控制台`);
-  router.push("/admin/dashboard");
+  router.push("/admin/game-features");
 };
 
 // URL参数处理函数
@@ -1502,6 +1615,13 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
   max-height: calc(100vh - var(--spacing-2xl) * 4);
+  overflow: hidden;
+}
+
+.tokens-table-wrapper {
+  flex: 1;
+  overflow-y: auto;
+  min-height: 0;
 }
 
 /* 深色主题下的列表区域背景 */
@@ -1539,11 +1659,12 @@ onUnmounted(() => {
 
 .header-actions {
   display: flex;
-  gap: var(--spacing-md);
+  gap: 6px;
   max-width: 100%;
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
-  flex-wrap: nowrap;
+  flex-wrap: wrap;
+  align-items: center;
 }
 
 .tokens-grid {
