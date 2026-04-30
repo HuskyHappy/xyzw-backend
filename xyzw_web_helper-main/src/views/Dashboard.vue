@@ -123,19 +123,19 @@
         <div class="settings-group settings-group--bordered">
           <div class="group-title">
             <span>选择账号</span>
-            <n-space size="small">
-              <n-button size="small" @click="selectAllTokens">全选</n-button>
-              <n-button size="small" @click="deselectAllTokens">全不选</n-button>
-            </n-space>
+            <n-checkbox
+              :checked="isAllSelected"
+              :indeterminate="isIndeterminate"
+              @update:checked="handleSelectAll"
+            >全选</n-checkbox>
           </div>
-          <n-data-table
-            :columns="tokenSelectColumns"
-            :data="paginatedTokens"
-            :pagination="{ pageSize: tokenPageSize, page: tokenPage, 'on-update:page': (p) => tokenPage = p }"
-            :row-key="(row) => row.id"
-            :row-class-name="() => 'token-select-row'"
-            size="small"
-          />
+          <n-checkbox-group v-model:value="taskForm.selectedTokens">
+            <n-grid :cols="tokenListColumns" :x-gap="12" :y-gap="8">
+              <n-grid-item v-for="token in sortedTokens" :key="token.id">
+                <n-checkbox :value="token.id">{{ token.name }}</n-checkbox>
+              </n-grid-item>
+            </n-grid>
+          </n-checkbox-group>
         </div>
 
         <!-- 选择任务 -->
